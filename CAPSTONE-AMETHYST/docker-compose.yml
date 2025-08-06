@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  mitmproxy:
+    image: mitmproxy/mitmproxy:9.0.1
+    container_name: mitmproxy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/home/mitmproxy/.mitmproxy
+      - ./scripts:/scripts
+    entrypoint: >
+      sh -c "mitmdump --mode reverse:http://nginx:80 --set upstream_server=nginx:80 --set keep_host_header=true --quiet -s /scripts/log_payload.py > /home/mitmproxy/.mitmproxy/requests.log 2>&1 || true"
+    networks:
+      - redteam
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80"
+    networks:
+      - redteam
+    depends_on:
+      - altoro-mutual
+      - dvwa
+      - juice-shop
+
+  altoro-mutual:
+    image: eystsen/altoro
+    container_name: altoro-mutual
+    ports:
+      - "8082:8080"
+    networks:
+      - redteam
+    restart: always
+
+  juice-shop:
+    image: bkimminich/juice-shop
+    container_name: juice-shop
+    ports:
+      - "3000:3000"
+    networks:
+      - redteam
+    restart: always
+
+  dvwa:
+    image: vulnerables/web-dvwa
+    container_name: dvwa
+    environment:
+      - MYSQL_PASS=pass
+    ports:
+      - "8081:80"
+    networks:
+      - redteam
+    restart: always
+
+networks:
+  redteam:
+    driver: bridge

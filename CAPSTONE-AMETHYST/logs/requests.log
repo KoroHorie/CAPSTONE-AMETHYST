@@ -1,0 +1,3 @@
+GET http://localhost:8080/ | BODY: 
+GET http://localhost:8080/login.jsp | BODY: 
+POST http://localhost:8080/doLogin | BODY: uid=admin&passw=admin&btnSubmit=Login

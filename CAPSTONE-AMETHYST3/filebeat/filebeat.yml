@@ -1,0 +1,27 @@
+filebeat.inputs:
+  - type: log
+    paths:
+      - /shared-logs/altoro-requests.log
+    fields:
+      app: altoro
+    fields_under_root: true
+    enabled: true
+  
+  - type: log
+    paths:
+      - /shared-logs/dvwa-requests.log
+    fields:
+      app: dvwa
+    fields_under_root: true
+    enabled: true
+    
+  - type: log
+    paths:
+      - /shared-logs/juice-requests.log
+    fields:
+      app: juice
+    fields_under_root: true
+    enabled: true
+
+output.logstash:
+  hosts: ["172.16.2.46:5044"]

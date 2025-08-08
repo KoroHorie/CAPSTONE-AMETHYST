@@ -1,0 +1,115 @@
+input {
+  beats {
+    port => 5044
+  }
+}
+
+filter {
+  grok {
+    match => {
+      "message" => [
+        # Match the HTTP method, URL, headers as Python dict string, and optional body
+        "^(%{WORD:http_method}) %{URI:http_uri} Headers: \{%{GREEDYDATA:raw_headers)\}( Body: (?<raw_body>.*))?"
+      ]
+    }
+    tag_on_failure => ["_grokparsefailure"]
+    remove_field => ["message"]
+  }
+
+  mutate {
+    gsub => [
+      # Clean up headers: remove single quotes and ensure JSON format
+      "raw_headers", "'", "\""
+    ]
+  }
+
+  # Try to parse raw_headers into a structured field
+  json {
+    source => "raw_headers"
+    target => "headers"
+    remove_field => ["raw_headers"]
+  }
+
+  # Attempt to parse the body payload
+  if [raw_body] {
+    # If it's URL-encoded like in dvwa and altoro
+    kv {
+      source => "raw_body"
+      field_split => "&"
+      value_split => "="
+      target => "body"
+      allow_duplicate_values => false
+    }
+
+    # If it's JSON like in juice-shop
+    json {
+      source => "raw_body"
+      target => "body_json"
+      remove_field => ["raw_body"]
+      add_tag => ["parsed_json_body"]
+    }
+
+    # Promote body_json fields to body if parsed
+    if "parsed_json_body" in [tags] {
+      ruby {
+        code => '
+          event.get("body_json").each { |k,v|
+            event.set("[body][#{k}]", v)
+          } if event.get("body_json").is_a?(Hash)
+        '
+        remove_field => ["body_json"]
+      }
+    }
+  }
+
+  # Add extracted values for better search
+  mutate {
+    add_field => {
+      "[http][method]" => "%{http_method}"
+      "[http][uri]"    => "%{http_uri}"
+    }
+  }
+
+  #mutate {
+  # add_field => { "[app]" => "%{app}" }
+  #}
+
+  ### === Classification Rules === ###
+  if [body] {
+    # Normalize all body values to a string
+    ruby {
+      code => '
+        attack_string = event.get("body").values.join(" ") rescue ""
+        event.set("body_string", attack_string)
+      '
+    }
+
+    if [body_string] =~ /(?i)(union.*select|or\s+\d+=\d+|sleep\(|benchmark\(|--|\'\s*or\s*1=1)/ {
+      mutate { add_field => { "classification" => "SQLi" } }
+    } else if [body_string] =~ /(?i)(<script>|<svg>|onerror=|javascript:)/ {
+      mutate { add_field => { "classification" => "XSS" } }
+    } else if [body_string] =~ /(?i)(login|user(name)?|pass(word)?)/ {
+      mutate { add_field => { "classification" => "Brute Force" } }
+    } else {
+      mutate { add_field => { "classification" => "None" } }
+    }
+  } else {
+    mutate { add_field => { "classification" => "None" } }
+  }
+
+  # Add student field fallback
+  #if ![student] or [student] == "" or [student] =~ /^%\{.*\}$/ {
+  #  mutate { add_field => { "student" => "%{[host][hostname]}" } }
+  #}
+}
+
+output {
+  elasticsearch {
+    hosts    => ["http://172.16.2.46:9200"]
+    index    => "weblog-%{+YYYY.MM.dd}"
+    user     => "elastic"
+    password => 'elasticPa$$w0rd'
+  }
+
+  stdout { codec => rubydebug }
+}
